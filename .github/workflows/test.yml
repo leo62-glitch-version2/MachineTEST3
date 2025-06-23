@@ -1,0 +1,54 @@
+name: Build & Test .deb for PyQt App
+
+on:
+  push:
+    paths:
+      - '**.py'
+  workflow_dispatch:
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: 📥 Cloner le dépôt
+        uses: actions/checkout@v3
+
+      - name: 🔎 Chercher app.py dans tout le dépôt
+        run: |
+          APP_FILE=$(find . -name "app.py" | head -n 1)
+          if [ -z "$APP_FILE" ]; then
+            echo "❌ Aucun fichier app.py trouvé !"
+            exit 1
+          fi
+          echo "✅ Fichier trouvé : $APP_FILE"
+          echo "APP_PATH=$APP_FILE" >> $GITHUB_ENV
+
+      - name: 🐍 Installer Python et dépendances
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pyqt5 python3-pyqt5.qtwebengine python3-pip
+          pip3 install pyinstaller fpm
+
+      - name: 🔧 Construire l'exécutable avec PyInstaller
+        run: |
+          pyinstaller --onefile "$APP_PATH" --name app
+          ls -lh dist/
+
+      - name: 📦 Créer le .deb avec FPM
+        run: |
+          fpm -s dir -t deb -n mon-appli-pyqt -v 1.0.0 \
+            --prefix /usr/local/bin \
+            dist/app
+
+      - name: 📁 Lister les fichiers générés
+        run: ls -lh *.deb
+
+      - name: 🧪 Installer le .deb généré
+        run: sudo dpkg -i mon-appli-pyqt_1.0.0_amd64.deb
+
+      - name: 🚀 Tester le lancement de l'application
+        run: |
+          echo "🧪 Test de lancement de l'exécutable..."
+          /usr/local/bin/app || { echo "❌ Erreur au lancement"; exit 1; }
+          echo "✅ Lancement réussi (aucune exception détectée)."
