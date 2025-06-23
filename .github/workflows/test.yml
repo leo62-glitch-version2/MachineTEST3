@@ -41,7 +41,10 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile "${{ steps.find_app.outputs.file_path }}"
+          pyinstaller --noconfirm --clean \
+  --add-binary "$(python3 -c 'import PyQt5.Qt; print(PyQt5.Qt.QLibraryInfo.location(PyQt5.Qt.QLibraryInfo.PluginsPath))')/platforms:platforms" \
+  --onefile "${{ steps.find_app.outputs.file_path }}"
+
 
       - name: Create .deb package with fpm
         run: |
