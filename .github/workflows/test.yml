@@ -58,3 +58,4 @@ jobs:
           echo "🧪 Testing app launch..."
           /usr/local/bin/app/app || { echo "❌ App failed to launch"; exit 1; }
           echo "✅ App launched successfully"
+          
