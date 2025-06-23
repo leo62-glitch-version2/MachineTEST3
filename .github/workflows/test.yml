@@ -1,4 +1,4 @@
-name: Build & Test .deb for PyQt App with Qt dependencies
+name: Build & Package .deb with Qt deps
 
 on:
   push:
@@ -7,55 +7,54 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-deb:
+  build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
       - name: Find app.py
         run: |
           APP_FILE=$(find . -name "app.py" | head -n 1)
           if [ -z "$APP_FILE" ]; then
-            echo "❌ app.py not found!"
+            echo "app.py not found"
             exit 1
           fi
           echo "APP_PATH=$APP_FILE" >> $GITHUB_ENV
 
       - name: Install system dependencies for Qt
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            python3-pyqt5 python3-pyqt5.qtwebengine python3-pip \
+          sudo apt update
+          sudo apt install -y python3-pyqt5 python3-pyqt5.qtwebengine python3-pip \
             libxcb-xinerama0 libxkbcommon-x11-0 libxcb1 libx11-xcb1 libxcb-render0 libxcb-shm0 \
-            rpm # (optional if you need rpm tools)
+            libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 libfontconfig1 libdbus-1-3
 
-      - name: Install Python packages
+      - name: Install python packages
         run: |
           pip3 install pyinstaller fpm
 
-      - name: Build executable with PyInstaller (onedir mode)
+      - name: Build app with PyInstaller (onedir)
         run: |
           pyinstaller --onedir --name app "$APP_PATH"
-          ls -lh dist/app
+          ls -l dist/app
 
-      - name: Package app directory into .deb with fpm
+      - name: Package app dir into .deb with fpm and dependencies
         run: |
           fpm -s dir -t deb -n mon-appli-pyqt -v 1.0.0 \
-            --prefix /usr/local/bin \
-            -C dist/app .
+            --depends python3-pyqt5 --depends python3-pyqt5.qtwebengine \
+            --depends libxcb-xinerama0 --depends libxkbcommon-x11-0 --depends libxcb1 \
+            --depends libx11-xcb1 --depends libxcb-render0 --depends libxcb-shm0 \
+            --depends libgl1-mesa-glx --depends libglib2.0-0 --depends libsm6 \
+            --depends libxext6 --depends libxrender1 --depends libfontconfig1 --depends libdbus-1-3 \
+            --prefix /usr/local/bin -C dist/app .
 
-      - name: List generated .deb files
+      - name: List deb files
         run: ls -lh *.deb
 
-      - name: Install generated .deb package
+      - name: Install .deb and test launch
         run: |
           sudo dpkg -i mon-appli-pyqt_1.0.0_amd64.deb || sudo apt-get install -f -y
+          /usr/local/bin/app/app || (echo "App launch failed" && exit 1)
+          echo "App launched successfully"
 
-      - name: Test launch app
-        run: |
-          echo "🧪 Testing app launch..."
-          /usr/local/bin/app/app || { echo "❌ App failed to launch"; exit 1; }
-          echo "✅ App launched successfully"
           
