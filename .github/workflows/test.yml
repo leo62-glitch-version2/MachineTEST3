@@ -50,11 +50,14 @@ jobs:
 
       - name: Build executable with PyInstaller (Qt plugins included)
         run: |
-          PLUGINS_PATH=$(python3 -c 'import PyQt5.Qt; print(PyQt5.Qt.QLibraryInfo.location(PyQt5.Qt.QLibraryInfo.PluginsPath))')
+          PLUGINS_PATH=$(python3 -c 'import PyQt5.QtCore; from PyQt5.QtCore import QLibraryInfo; print(QLibraryInfo.location(QLibraryInfo.PluginsPath))')
           pyinstaller --noconfirm --clean \
-            --add-binary "$PLUGINS_PATH/platforms:platforms" \
+            --collect-submodules PyQt5 \
+            --add-binary "$PLUGINS_PATH/platforms/libqxcb.so:platforms" \
+            --add-binary "$PLUGINS_PATH/xcbglintegrations:xcbglintegrations" \
+            --add-binary "$PLUGINS_PATH/imageformats:platforms/imageformats" \
             --onefile "${{ steps.find_app.outputs.file_path }}"
-
+            
       - name: Create .deb package with fpm
         run: |
           mkdir -p package/usr/local/bin
