@@ -18,11 +18,20 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ruby ruby-dev build-essential xvfb \
-            libgl1-mesa-glx libx11-6 libxext6 libxrender1 libxcb1 libfontconfig1 libfreetype6
+          sudo apt-get install -y \
+            ruby ruby-dev build-essential xvfb \
+            libgl1-mesa-glx libx11-6 libxext6 libxrender1 libxcb1 \
+            libfontconfig1 libfreetype6 libxkbcommon-x11-0 \
+            libxcb-cursor0 libxcb-keysyms1 libxcb-image0 \
+            libxcb-shm0 libxcb-icccm4 libxcb-xfixes0 \
+            libxcb-shape0 libxcb-randr0 libxcb-render-util0 \
+            libxcomposite1 libxcursor1 libxdamage1 \
+            libxi6 libxtst6 libnss3 libatk-bridge2.0-0 \
+            libgtk-3-0
+
           sudo gem install --no-document fpm
 
           python -m pip install --upgrade pip
@@ -39,17 +48,17 @@ jobs:
           echo "✅ Fichier trouvé : $FILE_PATH"
           echo "file_path=$FILE_PATH" >> $GITHUB_OUTPUT
 
-      - name: Build executable
+      - name: Build executable with PyInstaller (Qt plugins included)
         run: |
+          PLUGINS_PATH=$(python3 -c 'import PyQt5.Qt; print(PyQt5.Qt.QLibraryInfo.location(PyQt5.Qt.QLibraryInfo.PluginsPath))')
           pyinstaller --noconfirm --clean \
-  --add-binary "$(python3 -c 'import PyQt5.Qt; print(PyQt5.Qt.QLibraryInfo.location(PyQt5.Qt.QLibraryInfo.PluginsPath))')/platforms:platforms" \
-  --onefile "${{ steps.find_app.outputs.file_path }}"
-
+            --add-binary "$PLUGINS_PATH/platforms:platforms" \
+            --onefile "${{ steps.find_app.outputs.file_path }}"
 
       - name: Create .deb package with fpm
         run: |
           mkdir -p package/usr/local/bin
-          cp dist/app package/usr/local/bin/app
+          cp dist/* package/usr/local/bin/app
 
           fpm -s dir -t deb \
             -n mon-appli-pyqt \
@@ -58,17 +67,16 @@ jobs:
             --description "Une application PyQt5 avec PyQtWebEngine" \
             --maintainer "TonNom <ton.email@example.com>" \
             --url "https://github.com/toncompte/tonrepo" \
-            -C package \
-            usr/local/bin/app
+            package/=/
 
       - name: Test if the app runs (headless)
         run: |
           echo "🧪 Test de lancement de l'exécutable..."
-          chmod +x dist/app
+          chmod +x dist/*
           timeout 5 xvfb-run -a ./dist/app &> output.log || true
 
-          if grep -q "Traceback" output.log; then
-            echo "❌ L'exécutable a levé une exception."
+          if grep -q "Traceback\|qt.qpa.plugin" output.log; then
+            echo "❌ L'exécutable a levé une exception ou un problème Qt."
             cat output.log
             exit 1
           else
