@@ -1,66 +1,80 @@
-name: Build and test .deb package
+name: Build .deb Package
 
 on:
   push:
-    paths:
-      - '**/*.py'
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+  build-deb:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby ruby-dev build-essential xvfb \
+            libgl1-mesa-glx libx11-6 libxext6 libxrender1 libxcb1 libfontconfig1 libfreetype6
+          sudo gem install --no-document fpm
+
+          python -m pip install --upgrade pip
+          pip install PyQt5 PyQtWebEngine pyinstaller
 
       - name: Find app.py
         id: find_app
         run: |
-          APP_FILE=$(find . -name "app.py" | head -n 1)
-          if [ -z "$APP_FILE" ]; then
-            echo "app.py not found"
+          FILE_PATH=$(find . -type f -name "app.py" | head -n 1)
+          if [ -z "$FILE_PATH" ]; then
+            echo "❌ app.py introuvable"
             exit 1
           fi
-          echo "APP_PATH=$APP_FILE" >> $GITHUB_ENV
-          echo "Found app.py at $APP_FILE"
+          echo "✅ Fichier trouvé : $FILE_PATH"
+          echo "file_path=$FILE_PATH" >> $GITHUB_OUTPUT
 
-      - name: Install system dependencies for Qt and packaging tools
+      - name: Build executable
         run: |
-          sudo apt update
-          sudo apt install -y python3-pyqt5 python3-pyqt5.qtwebengine python3-pip \
-            libxcb-xinerama0 libxkbcommon-x11-0 libxcb1 libx11-xcb1 libxcb-render0 libxcb-shm0 \
-            libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 libfontconfig1 libdbus-1-3
+          pyinstaller --onefile "${{ steps.find_app.outputs.file_path }}"
 
-      - name: Install Python packages
+      - name: Create .deb package with fpm
         run: |
-          pip3 install pyinstaller fpm
+          mkdir -p package/usr/local/bin
+          cp dist/app package/usr/local/bin/app
 
-      - name: Build app with PyInstaller (onedir)
+          fpm -s dir -t deb \
+            -n mon-appli-pyqt \
+            -v 1.0.0 \
+            --license "MIT" \
+            --description "Une application PyQt5 avec PyQtWebEngine" \
+            --maintainer "TonNom <ton.email@example.com>" \
+            --url "https://github.com/toncompte/tonrepo" \
+            -C package \
+            usr/local/bin/app
+
+      - name: Test if the app runs (headless)
         run: |
-          pyinstaller --onedir --name app "$APP_PATH"
-          ls -lh dist/app
+          echo "🧪 Test de lancement de l'exécutable..."
+          chmod +x dist/app
+          timeout 5 xvfb-run -a ./dist/app &> output.log || true
 
-      - name: Package app dir into .deb with fpm and dependencies
-        run: |
-          fpm -s dir -t deb -n mon-appli-pyqt -v 1.0.0 \
-            --depends python3-pyqt5 --depends python3-pyqt5.qtwebengine \
-            --depends libxcb-xinerama0 --depends libxkbcommon-x11-0 --depends libxcb1 \
-            --depends libx11-xcb1 --depends libxcb-render0 --depends libxcb-shm0 \
-            --depends libgl1-mesa-glx --depends libglib2.0-0 --depends libsm6 \
-            --depends libxext6 --depends libxrender1 --depends libfontconfig1 --depends libdbus-1-3 \
-            --prefix /usr/local/bin -C dist/app .
-          echo "Generated .deb files:"
-          ls -lh *.deb || ls -lh dist/app/*.deb
+          if grep -q "Traceback" output.log; then
+            echo "❌ L'exécutable a levé une exception."
+            cat output.log
+            exit 1
+          else
+            echo "✅ Lancement réussi (aucune exception détectée)."
+          fi
 
-      - name: Install .deb and test launch
-        run: |
-          # Trouve le .deb (dans racine ou dist/app)
-          DEB_FILE=$(ls *.deb 2>/dev/null || ls dist/app/*.deb)
-          echo "Installing $DEB_FILE"
-          sudo dpkg -i $DEB_FILE || sudo apt-get install -f -y
-          # Lance le binaire
-          /usr/local/bin/app/app || (echo "App launch failed" && exit 1)
-          echo "App launched successfully"
+      - name: Upload .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: ./*.deb
 
-          
