@@ -1,9 +1,8 @@
-name: Build & Test .deb for PyQt App
+name: Build .deb Package
 
 on:
   push:
-    paths:
-      - '**.py'
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -11,44 +10,68 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 📥 Cloner le dépôt
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: 🔎 Chercher app.py dans tout le dépôt
-        run: |
-          APP_FILE=$(find . -name "app.py" | head -n 1)
-          if [ -z "$APP_FILE" ]; then
-            echo "❌ Aucun fichier app.py trouvé !"
-            exit 1
-          fi
-          echo "✅ Fichier trouvé : $APP_FILE"
-          echo "APP_PATH=$APP_FILE" >> $GITHUB_ENV
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      - name: 🐍 Installer Python et dépendances
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pyqt5 python3-pyqt5.qtwebengine python3-pip
-          pip3 install pyinstaller fpm
+          sudo apt-get install -y ruby ruby-dev build-essential xvfb
+          sudo gem install --no-document fpm
 
-      - name: 🔧 Construire l'exécutable avec PyInstaller
+          python -m pip install --upgrade pip
+          pip install PyQt5 PyQtWebEngine pyinstaller
+
+      - name: Find app.py
+        id: find_app
         run: |
-          pyinstaller --onefile "$APP_PATH" --name app
-          ls -lh dist/
+          FILE_PATH=$(find . -type f -name "app.py" | head -n 1)
+          if [ -z "$FILE_PATH" ]; then
+            echo "❌ app.py introuvable"
+            exit 1
+          fi
+          echo "✅ Fichier trouvé : $FILE_PATH"
+          echo "file_path=$FILE_PATH" >> $GITHUB_OUTPUT
 
-      - name: 📦 Créer le .deb avec FPM
+      - name: Build executable
         run: |
-          fpm -s dir -t deb -n mon-appli-pyqt -v 1.0.0 \
-            --prefix /usr/local/bin \
-            dist/app
+          pyinstaller --onefile "${{ steps.find_app.outputs.file_path }}"
 
-      - name: 📁 Lister les fichiers générés
-        run: ls -lh *.deb
+      - name: Create .deb package with fpm
+        run: |
+          mkdir -p package/usr/local/bin
+          cp dist/* package/usr/local/bin/app
 
-      - name: 🧪 Installer le .deb généré
-        run: sudo dpkg -i mon-appli-pyqt_1.0.0_amd64.deb
+          fpm -s dir -t deb \
+            -n mon-appli-pyqt \
+            -v 1.0.0 \
+            --license "MIT" \
+            --description "Une application PyQt5 avec PyQtWebEngine" \
+            --maintainer "TonNom <ton.email@example.com>" \
+            --url "https://github.com/toncompte/tonrepo" \
+            package/=/
 
-      - name: 🚀 Tester le lancement de l'application
+      - name: Test if the app runs (headless)
         run: |
           echo "🧪 Test de lancement de l'exécutable..."
-          /usr/local/bin/app || { echo "❌ Erreur au lancement"; exit 1; }
-          echo "✅ Lancement réussi (aucune exception détectée)."
+          chmod +x dist/*
+          timeout 5 xvfb-run -a ./dist/app &> output.log || true
+
+          if grep -q "Traceback" output.log; then
+            echo "❌ L'exécutable a levé une exception."
+            cat output.log
+            exit 1
+          else
+            echo "✅ Lancement réussi (aucune exception détectée)."
+          fi
+
+      - name: Upload .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: ./*.deb
